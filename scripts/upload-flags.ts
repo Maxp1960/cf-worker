@@ -45,8 +45,8 @@ async function main() {
     const key = file.toLowerCase();
     const contentType = file.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
 
-    const localFlag = isLocal ? '--local' : '--remote';
-    const command = `npx wrangler r2 object put "${bucketName}/${key}" --file "${filePath}" --content-type "${contentType}" ${localFlag}`;
+    const localArg = isLocal ? ' --local' : '';
+    const command = `npx wrangler r2 object put "${bucketName}/${key}" --file "${filePath}" --content-type "${contentType}"${localArg}`;
 
     const envVars = {
       ...process.env,
