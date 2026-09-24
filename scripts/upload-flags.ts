@@ -48,9 +48,15 @@ async function main() {
     const localFlag = isLocal ? '--local' : '--remote';
     const command = `npx wrangler r2 object put "${bucketName}/${key}" --file "${filePath}" --content-type "${contentType}" ${localFlag}`;
 
+    const envVars = {
+      ...process.env,
+      ...(creds.apiToken ? { CLOUDFLARE_API_TOKEN: creds.apiToken } : {}),
+      ...(creds.accountId ? { CLOUDFLARE_ACCOUNT_ID: creds.accountId } : {})
+    };
+
     console.log(`Uploading: ${file} -> r2://${bucketName}/${key}...`);
     try {
-      execSync(command, { cwd: ROOT_DIR, stdio: 'pipe' });
+      execSync(command, { cwd: ROOT_DIR, stdio: 'pipe', env: envVars });
       console.log(`  ✅ Successfully uploaded ${key}`);
     } catch (err: any) {
       console.error(`  ❌ Failed to upload ${key}:`, err.stderr?.toString() || err.message);
