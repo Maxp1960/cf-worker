@@ -27,5 +27,6 @@ Desktop.ini
 # IDE & Editor files
 .vscode/
 .idea/
-*.swp
-*.swo
+# Documentation / Deliverables (Excluded from public repo)
+DOC/
+doc/
