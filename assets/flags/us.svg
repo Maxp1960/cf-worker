@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
+  <g fill-rule="evenodd">
+    <path fill="#bd3d44" d="M0 0h640v480H0z"/>
+    <path stroke="#fff" stroke-width="37" d="M0 55.5h640M0 129.5h640M0 203.5h640M0 277.5h640M0 351.5h640M0 425.5h640"/>
+    <path fill="#192f5d" d="M0 0h256v258.5H0z"/>
+    <g fill="#fff">
+      <circle cx="128" cy="129" r="60" fill="#fff" opacity="0.9"/>
+      <text x="128" y="140" font-size="40" font-family="sans-serif" font-weight="bold" text-anchor="middle" fill="#192f5d">USA</text>
+    </g>
+  </g>
+</svg>

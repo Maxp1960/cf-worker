@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FLAGS_BUCKET",
+      "bucket_name": "country-flags",
+      "preview_bucket_name": "country-flags-preview"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

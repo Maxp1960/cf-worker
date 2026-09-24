@@ -1,0 +1,312 @@
+/**
+ * Cloudflare Account Authentication & Secure Credential Management Module
+ *
+ * This module allows developers to securely configure, verify, and store Cloudflare
+ * credentials locally in `.env` and `.dev.vars` without risking committing secrets to Git.
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as readline from 'node:readline';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, '..');
+
+const ENV_PATH = path.join(ROOT_DIR, '.env');
+const DEV_VARS_PATH = path.join(ROOT_DIR, '.dev.vars');
+const GITIGNORE_PATH = path.join(ROOT_DIR, '.gitignore');
+
+export interface CloudflareCredentials {
+  apiToken?: string;
+  accountId?: string;
+  r2BucketName?: string;
+  cfAccessAud?: string;
+  cfAccessTeamDomain?: string;
+  devMockEmail?: string;
+  devMockCountry?: string;
+}
+
+/**
+ * Validates that .gitignore exists and properly protects secret files.
+ */
+export function verifyGitignoreProtection(): boolean {
+  if (!fs.existsSync(GITIGNORE_PATH)) {
+    console.error('⚠️  CRITICAL: .gitignore does not exist in root directory!');
+    return false;
+  }
+
+  const content = fs.readFileSync(GITIGNORE_PATH, 'utf-8');
+  const hasEnv = content.includes('.env');
+  const hasDevVars = content.includes('.dev.vars');
+
+  if (!hasEnv || !hasDevVars) {
+    console.error('⚠️  CRITICAL: .gitignore does NOT contain .env or .dev.vars!');
+    console.error('   Aborting to prevent accidental secret leak.');
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Parses a simple KEY=VALUE formatted file.
+ */
+export function parseEnvFile(filePath: string): Record<string, string> {
+  if (!fs.existsSync(filePath)) return {};
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const result: Record<string, string> = {};
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = trimmed.slice(0, eqIdx).trim();
+      let value = trimmed.slice(eqIdx + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Loads currently configured credentials from .env and .dev.vars
+ */
+export function loadCredentials(): CloudflareCredentials {
+  const env = parseEnvFile(ENV_PATH);
+  const devVars = parseEnvFile(DEV_VARS_PATH);
+
+  return {
+    apiToken: env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN,
+    accountId: env.CLOUDFLARE_ACCOUNT_ID || process.env.CLOUDFLARE_ACCOUNT_ID,
+    r2BucketName: env.R2_BUCKET_NAME || 'country-flags',
+    cfAccessAud: env.CF_ACCESS_AUD,
+    cfAccessTeamDomain: env.CF_ACCESS_TEAM_DOMAIN,
+    devMockEmail: devVars.DEV_MOCK_EMAIL || 'test-user@example.com',
+    devMockCountry: devVars.DEV_MOCK_COUNTRY || 'US'
+  };
+}
+
+/**
+ * Verifies a Cloudflare API Token against Cloudflare's REST API.
+ */
+export async function verifyCloudflareToken(token: string): Promise<{
+  valid: boolean;
+  status?: string;
+  error?: string;
+  id?: string;
+}> {
+  try {
+    const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data: any = await res.json();
+    if (res.ok && data.success) {
+      return {
+        valid: true,
+        status: data.result?.status,
+        id: data.result?.id
+      };
+    } else {
+      const msg = data.errors?.[0]?.message || 'Unknown API error';
+      return { valid: false, error: msg };
+    }
+  } catch (err: any) {
+    return { valid: false, error: err.message };
+  }
+}
+
+/**
+ * Lists Cloudflare Accounts accessible by the token.
+ */
+export async function listCloudflareAccounts(token: string): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const res = await fetch('https://api.cloudflare.com/client/v4/accounts', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    const data: any = await res.json();
+    if (res.ok && data.success && Array.isArray(data.result)) {
+      return data.result.map((acc: any) => ({ id: acc.id, name: acc.name }));
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Safely saves credentials to local files (.env and .dev.vars)
+ */
+export function saveCredentials(creds: CloudflareCredentials): void {
+  if (!verifyGitignoreProtection()) {
+    throw new Error('Refusing to save credentials: .gitignore is missing or insecure.');
+  }
+
+  // Write .env
+  const envLines: string[] = [
+    '# Cloudflare Account Credentials (DO NOT COMMIT)',
+    '# Generated by Cloudflare Auth Module',
+    `CLOUDFLARE_API_TOKEN=${creds.apiToken || ''}`,
+    `CLOUDFLARE_ACCOUNT_ID=${creds.accountId || ''}`,
+    `R2_BUCKET_NAME=${creds.r2BucketName || 'country-flags'}`
+  ];
+  if (creds.cfAccessAud) envLines.push(`CF_ACCESS_AUD=${creds.cfAccessAud}`);
+  if (creds.cfAccessTeamDomain) envLines.push(`CF_ACCESS_TEAM_DOMAIN=${creds.cfAccessTeamDomain}`);
+  envLines.push('');
+
+  fs.writeFileSync(ENV_PATH, envLines.join('\n'), 'utf-8');
+
+  // Write .dev.vars for Wrangler local development
+  const devVarsLines: string[] = [
+    '# Cloudflare Worker Local Dev Secrets (DO NOT COMMIT)',
+    '# Generated by Cloudflare Auth Module',
+    `DEV_MOCK_EMAIL=${creds.devMockEmail || 'test-user@example.com'}`,
+    `DEV_MOCK_COUNTRY=${creds.devMockCountry || 'US'}`,
+    ''
+  ];
+
+  fs.writeFileSync(DEV_VARS_PATH, devVarsLines.join('\n'), 'utf-8');
+  console.log('✅ Credentials successfully saved to .env and .dev.vars (excluded by .gitignore)');
+}
+
+/**
+ * Interactive prompt helper
+ */
+function askQuestion(rl: readline.Interface, query: string): Promise<string> {
+  return new Promise((resolve) => rl.question(query, resolve));
+}
+
+/**
+ * Interactive setup / CLI runner
+ */
+async function main() {
+  const args = process.argv.slice(2);
+  const isCheckMode = args.includes('--check');
+
+  console.log('====================================================');
+  console.log('  Cloudflare Auth & Secure Credentials Module       ');
+  console.log('====================================================\n');
+
+  if (!verifyGitignoreProtection()) {
+    process.exit(1);
+  }
+
+  const existing = loadCredentials();
+
+  if (isCheckMode) {
+    console.log('🔍 Checking existing credentials...\n');
+    if (!existing.apiToken) {
+      console.log('❌ No CLOUDFLARE_API_TOKEN found in .env or environment.');
+      console.log('👉 Run `npm run auth` to configure your credentials.\n');
+      return;
+    }
+
+    console.log(`Checking token ending in ...${existing.apiToken.slice(-4)}`);
+    const verifyRes = await verifyCloudflareToken(existing.apiToken);
+    if (verifyRes.valid) {
+      console.log(`✅ Token is VALID (Status: ${verifyRes.status || 'active'})`);
+
+      const accounts = await listCloudflareAccounts(existing.apiToken);
+      if (accounts.length > 0) {
+        console.log(`\nAccessible Cloudflare Accounts (${accounts.length}):`);
+        for (const acc of accounts) {
+          const isSelected = acc.id === existing.accountId ? ' (configured)' : '';
+          console.log(` - ${acc.name} [ID: ${acc.id}]${isSelected}`);
+        }
+      }
+    } else {
+      console.log(`❌ Token verification failed: ${verifyRes.error}`);
+    }
+    return;
+  }
+
+  // Interactive setup
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    console.log('Enter your Cloudflare credentials. They will be stored locally');
+    console.log('in .env and .dev.vars, protected by .gitignore.\n');
+
+    const tokenPrompt = existing.apiToken
+      ? `Cloudflare API Token [press Enter to keep existing ...${existing.apiToken.slice(-4)}]: `
+      : 'Cloudflare API Token: ';
+    const inputToken = await askQuestion(rl, tokenPrompt);
+    const apiToken = inputToken.trim() || existing.apiToken || '';
+
+    let accountId = existing.accountId || '';
+    if (apiToken) {
+      console.log('\nValidating API Token with Cloudflare...');
+      const verifyRes = await verifyCloudflareToken(apiToken);
+      if (verifyRes.valid) {
+        console.log('✅ Token verified successfully!');
+        const accounts = await listCloudflareAccounts(apiToken);
+        if (accounts.length === 1 && !accountId) {
+          accountId = accounts[0].id;
+          console.log(`Found account: ${accounts[0].name} (${accountId})`);
+        } else if (accounts.length > 1) {
+          console.log('\nAvailable Accounts:');
+          accounts.forEach((acc, i) => console.log(`  [${i + 1}] ${acc.name} (${acc.id})`));
+          const choice = await askQuestion(rl, `Select account [1-${accounts.length}]: `);
+          const idx = parseInt(choice.trim(), 10) - 1;
+          if (idx >= 0 && idx < accounts.length) {
+            accountId = accounts[idx].id;
+          }
+        }
+      } else {
+        console.log(`⚠️  Warning: Token validation reported: ${verifyRes.error}`);
+      }
+    }
+
+    if (!accountId) {
+      const accPrompt = existing.accountId
+        ? `Cloudflare Account ID [press Enter to keep ${existing.accountId}]: `
+        : 'Cloudflare Account ID: ';
+      const inputAcc = await askQuestion(rl, accPrompt);
+      accountId = inputAcc.trim() || existing.accountId || '';
+    }
+
+    const bucketPrompt = `R2 Bucket Name [default: ${existing.r2BucketName || 'country-flags'}]: `;
+    const inputBucket = await askQuestion(rl, bucketPrompt);
+    const r2BucketName = inputBucket.trim() || existing.r2BucketName || 'country-flags';
+
+    saveCredentials({
+      apiToken,
+      accountId,
+      r2BucketName,
+      devMockEmail: existing.devMockEmail || 'test-user@example.com',
+      devMockCountry: existing.devMockCountry || 'US'
+    });
+
+    console.log('\n🎉 Setup complete! You are ready to develop and deploy.');
+    console.log('Next commands:');
+    console.log('  npm run auth:check    # Verify credentials anytime');
+    console.log('  npm run dev           # Start local Worker development server');
+    console.log('  npm run upload-flags  # Upload country flag assets to R2');
+    console.log('  npm run deploy        # Deploy worker to Cloudflare');
+  } finally {
+    rl.close();
+  }
+}
+
+// Run if called directly
+if (process.argv[1] && process.argv[1].endsWith('auth.ts')) {
+  main().catch((err) => {
+    console.error('Fatal error in auth module:', err);
+    process.exit(1);
+  });
+}

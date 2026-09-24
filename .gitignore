@@ -1,0 +1,31 @@
+# Node & Dependencies
+node_modules/
+dist/
+.cache/
+
+# Cloudflare & Wrangler Local State
+.wrangler/
+.mf/
+
+# Secrets & Environment Credentials (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+credentials.json
+cloudflare-creds.json
+*.pem
+*.key
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo

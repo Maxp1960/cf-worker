@@ -1,0 +1,7 @@
+# Cloudflare Worker Local Environment Secrets (Used by `wrangler dev`)
+# DO NOT commit real values to version control.
+# Copy to `.dev.vars` for local development.
+
+# Mock user for local development if Cf-Access headers are absent
+DEV_MOCK_EMAIL=test-user@example.com
+DEV_MOCK_COUNTRY=US

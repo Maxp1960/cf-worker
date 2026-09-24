@@ -1,0 +1,35 @@
+{
+  "name": "cf-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker serving authenticated user identity and country flags from private R2 bucket",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "auth": "tsx scripts/auth.ts",
+    "auth:check": "tsx scripts/auth.ts --check",
+    "upload-flags": "tsx scripts/upload-flags.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "cloudflare-access",
+    "r2",
+    "wrangler"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "@types/node": "^26.6.2",
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.101.0"
+  }
+}
