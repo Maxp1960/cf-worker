@@ -94,32 +94,82 @@ export function loadCredentials(): CloudflareCredentials {
 
 /**
  * Verifies a Cloudflare API Token against Cloudflare's REST API.
+ * Supports both User-level API Tokens and Account-scoped API Tokens (prefix cfat_...).
  */
-export async function verifyCloudflareToken(token: string): Promise<{
+export async function verifyCloudflareToken(
+  token: string,
+  accountId?: string
+): Promise<{
   valid: boolean;
+  type?: 'User API Token' | 'Account API Token';
   status?: string;
   error?: string;
   id?: string;
+  accountName?: string;
 }> {
   try {
-    const res = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
+    // 1. If Account ID is known or token is an Account Token (cfat_...), verify against Account endpoint
+    if (accountId) {
+      const accRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const accData: any = await accRes.json();
+      if (accRes.ok && accData.success && accData.result) {
+        return {
+          valid: true,
+          type: 'Account API Token',
+          status: 'active',
+          id: accData.result.id,
+          accountName: accData.result.name
+        };
+      }
+    }
+
+    // 2. Try listing accounts directly
+    const listRes = await fetch('https://api.cloudflare.com/client/v4/accounts', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    const listData: any = await listRes.json();
+    if (listRes.ok && listData.success && Array.isArray(listData.result) && listData.result.length > 0) {
+      return {
+        valid: true,
+        type: 'Account API Token',
+        status: 'active',
+        id: listData.result[0].id,
+        accountName: listData.result[0].name
+      };
+    }
+
+    // 3. Fallback to /user/tokens/verify for User-level API Tokens
+    const userRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
     });
 
-    const data: any = await res.json();
-    if (res.ok && data.success) {
+    const userData: any = await userRes.json();
+    if (userRes.ok && userData.success) {
       return {
         valid: true,
-        status: data.result?.status,
-        id: data.result?.id
+        type: 'User API Token',
+        status: userData.result?.status,
+        id: userData.result?.id
       };
-    } else {
-      const msg = data.errors?.[0]?.message || 'Unknown API error';
-      return { valid: false, error: msg };
     }
+
+    const errorMsg =
+      userData.errors?.[0]?.message ||
+      listData.errors?.[0]?.message ||
+      'Token verification failed. Check permissions or Account ID.';
+
+    return { valid: false, error: errorMsg };
   } catch (err: any) {
     return { valid: false, error: err.message };
   }
@@ -128,7 +178,10 @@ export async function verifyCloudflareToken(token: string): Promise<{
 /**
  * Lists Cloudflare Accounts accessible by the token.
  */
-export async function listCloudflareAccounts(token: string): Promise<Array<{ id: string; name: string }>> {
+export async function listCloudflareAccounts(
+  token: string,
+  knownAccountId?: string
+): Promise<Array<{ id: string; name: string }>> {
   try {
     const res = await fetch('https://api.cloudflare.com/client/v4/accounts', {
       headers: {
@@ -137,9 +190,24 @@ export async function listCloudflareAccounts(token: string): Promise<Array<{ id:
       }
     });
     const data: any = await res.json();
-    if (res.ok && data.success && Array.isArray(data.result)) {
+    if (res.ok && data.success && Array.isArray(data.result) && data.result.length > 0) {
       return data.result.map((acc: any) => ({ id: acc.id, name: acc.name }));
     }
+
+    // If listing is restricted but we have an accountId, try querying that specific account
+    if (knownAccountId) {
+      const singleRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${knownAccountId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const singleData: any = await singleRes.json();
+      if (singleRes.ok && singleData.success && singleData.result) {
+        return [{ id: singleData.result.id, name: singleData.result.name }];
+      }
+    }
+
     return [];
   } catch {
     return [];
@@ -214,11 +282,14 @@ async function main() {
     }
 
     console.log(`Checking token ending in ...${existing.apiToken.slice(-4)}`);
-    const verifyRes = await verifyCloudflareToken(existing.apiToken);
+    const verifyRes = await verifyCloudflareToken(existing.apiToken, existing.accountId);
     if (verifyRes.valid) {
-      console.log(`✅ Token is VALID (Status: ${verifyRes.status || 'active'})`);
+      console.log(`✅ Token is VALID (${verifyRes.type || 'API Token'}, Status: ${verifyRes.status || 'active'})`);
+      if (verifyRes.accountName) {
+        console.log(`👤 Connected Account: ${verifyRes.accountName} [ID: ${existing.accountId || verifyRes.id}]`);
+      }
 
-      const accounts = await listCloudflareAccounts(existing.apiToken);
+      const accounts = await listCloudflareAccounts(existing.apiToken, existing.accountId);
       if (accounts.length > 0) {
         console.log(`\nAccessible Cloudflare Accounts (${accounts.length}):`);
         for (const acc of accounts) {
@@ -249,10 +320,10 @@ async function main() {
 
     if (apiToken) {
       console.log('Validating API Token with Cloudflare...');
-      const verifyRes = await verifyCloudflareToken(apiToken);
+      const verifyRes = await verifyCloudflareToken(apiToken, accountId);
       if (verifyRes.valid) {
-        console.log('✅ Token verified successfully!');
-        const accounts = await listCloudflareAccounts(apiToken);
+        console.log(`✅ Token verified successfully! (${verifyRes.type || 'Valid'})`);
+        const accounts = await listCloudflareAccounts(apiToken, accountId);
         if (accounts.length === 1 && !accountId) {
           accountId = accounts[0].id;
           console.log(`Auto-selected account: ${accounts[0].name} (${accountId})`);
