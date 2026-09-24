@@ -232,6 +232,46 @@ async function main() {
     return;
   }
 
+  function getArgVal(flag: string): string | undefined {
+    const idx = args.indexOf(flag);
+    return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : undefined;
+  }
+
+  const cliToken = getArgVal('--token');
+  const cliAccount = getArgVal('--account');
+  const cliBucket = getArgVal('--bucket');
+
+  // If credentials supplied via CLI flags
+  if (cliToken !== undefined || cliAccount !== undefined || cliBucket !== undefined) {
+    const apiToken = cliToken ?? existing.apiToken ?? '';
+    let accountId = cliAccount ?? existing.accountId ?? '';
+    const r2BucketName = cliBucket ?? existing.r2BucketName ?? 'country-flags';
+
+    if (apiToken) {
+      console.log('Validating API Token with Cloudflare...');
+      const verifyRes = await verifyCloudflareToken(apiToken);
+      if (verifyRes.valid) {
+        console.log('✅ Token verified successfully!');
+        const accounts = await listCloudflareAccounts(apiToken);
+        if (accounts.length === 1 && !accountId) {
+          accountId = accounts[0].id;
+          console.log(`Auto-selected account: ${accounts[0].name} (${accountId})`);
+        }
+      } else {
+        console.log(`⚠️  Warning: Token validation reported: ${verifyRes.error}`);
+      }
+    }
+
+    saveCredentials({
+      apiToken,
+      accountId,
+      r2BucketName,
+      devMockEmail: existing.devMockEmail || 'test-user@example.com',
+      devMockCountry: existing.devMockCountry || 'US'
+    });
+    return;
+  }
+
   // Interactive setup
   const rl = readline.createInterface({
     input: process.stdin,
